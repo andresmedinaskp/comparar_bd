@@ -25,93 +25,312 @@ def clean_sheet_name(name):
     cleaned = cleaned.strip("'")
     return cleaned
 
-def exportar_solo_diferencias(ruta_base, filas, sql_bd1, sql_bd2):
+def exportar_solo_diferencias(ruta_base, filas, sql_bd1, sql_bd2, opciones_seleccionadas):
     """
-    Exporta solo las diferencias a archivos TXT separados por BD.
-    
-    Args:
-        ruta_base (str): Ruta base para los archivos
-        filas (list): Lista de diferencias encontradas
-        sql_bd1 (str): SQL para BD1
-        sql_bd2 (str): SQL para BD2
-        
-    Returns:
-        tuple: (ruta_txt_bd1, ruta_txt_bd2)
+    Exporta solo las diferencias a 2 archivos TXT limpios.
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # Separar diferencias por BD
-    diferencias_bd1 = [f for f in filas if f[5] and not f[6]]  # Solo tiene SQL para BD1
-    diferencias_bd2 = [f for f in filas if f[6] and not f[5]]  # Solo tiene SQL para BD2
-    diferencias_comunes = [f for f in filas if f[5] and f[6]]  # Tiene SQL para ambas
+    # Filtrar filas según las opciones seleccionadas
+    filas_filtradas = _filtrar_filas_por_opciones(filas, opciones_seleccionadas)
     
-    # Exportar TXT con diferencias separadas
-    txt_path_bd1 = f"{ruta_base}_BD1_diferencias_{timestamp}.txt"
-    _exportar_txt_diferencias(txt_path_bd1, diferencias_bd1 + diferencias_comunes, "BD1")
+    # DEBUG: Mostrar información de las filas
+    print(f"Total filas filtradas: {len(filas_filtradas)}")
+    for i, fila in enumerate(filas_filtradas[:5]):  # Mostrar primeras 5 filas
+        print(f"Fila {i}: {fila[0]}, {fila[1]}, {fila[2]}")
     
-    txt_path_bd2 = f"{ruta_base}_BD2_diferencias_{timestamp}.txt"
-    _exportar_txt_diferencias(txt_path_bd2, diferencias_bd2 + diferencias_comunes, "BD2")
+    # Exportar TXT para BD1 (lo que le falta de BD2)
+    txt_path_bd1 = f"{ruta_base}_scripts_BD1_{timestamp}.txt"
+    _exportar_scripts_bd1(txt_path_bd1, filas_filtradas)
     
-    # Exportar TXT con SQL de ambas BD
+    # Exportar TXT para BD2 (lo que le falta de BD1 + modificaciones)
+    txt_path_bd2 = f"{ruta_base}_scripts_BD2_{timestamp}.txt"
+    _exportar_scripts_bd2(txt_path_bd2, filas_filtradas)
+    
+    # Exportar TXT con SQL completo
     txt_path_sql = f"{ruta_base}_sql_completo_{timestamp}.txt"
     _exportar_txt_sql(txt_path_sql, sql_bd1, sql_bd2)
 
     return txt_path_bd1, txt_path_bd2, txt_path_sql
 
-def _exportar_txt_diferencias(ruta, filas, bd_destino):
+def _filtrar_filas_por_opciones(filas, opciones):
     """
-    Exporta las diferencias a un archivo TXT específico para una BD.
+    Filtra las filas según las opciones seleccionadas por el usuario.
     
     Args:
-        ruta (str): Ruta del archivo TXT
-        filas (list): Lista de diferencias
-        bd_destino (str): "BD1" o "BD2" - indica para qué BD es el reporte
+        filas (list): Lista completa de diferencias
+        opciones (dict): Opciones seleccionadas
+        
+    Returns:
+        list: Filas filtradas
+    """
+    if not opciones:
+        return filas  # Si no hay opciones, retornar todo
+    
+    filas_filtradas = []
+    
+    # Mapeo de tipos de objeto a las opciones (MÁS ESPECÍFICO)
+    mapeo_tipos = {
+        'Tablas': 'tablas',
+        'Campos_': 'campos',
+        'Indices_': 'indices', 
+        'PK_': 'pk',
+        'FK_': 'fk',
+        'Triggers': 'triggers',
+        'Procedimientos': 'procedimientos',
+        'Vistas': 'vistas',
+        'Generadores': 'generadores'
+    }
+    
+    for fila in filas:
+        tipo_objeto = fila[0]
+        
+        # Verificar si este tipo de objeto fue seleccionado
+        incluir = False
+        
+        for prefijo, opcion in mapeo_tipos.items():
+            if tipo_objeto.startswith(prefijo):
+                if opciones.get(opcion, False):
+                    incluir = True
+                break
+        
+        # Si no coincide con ningún prefijo conocido, incluir por defecto
+        if not any(tipo_objeto.startswith(prefijo) for prefijo in mapeo_tipos.keys()):
+            incluir = True
+        
+        if incluir:
+            filas_filtradas.append(fila)
+    
+    return filas_filtradas
+
+def _exportar_scripts_bd1(ruta, filas):
+    """
+    Exporta scripts para BD1: Todo lo que le falta pero sí está en BD2.
     """
     with open(ruta, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write(f"REPORTE DE DIFERENCIAS - {bd_destino}\n")
-        f.write("=" * 80 + "\n\n")
+        f.write("-- SCRIPTS PARA BD1 (PRINCIPAL)\n")
+        f.write("-- Agregar lo que falta en BD1 pero existe en BD2\n")
+        f.write("-- Ejecutar en orden en BD1\n\n")
         
-        # Agrupar por tipo de objeto
-        diferencias_por_tipo = {}
+        # Recolectar todos los scripts para BD1
+        todos_scripts = []
+        
         for fila in filas:
-            tipo_objeto = fila[0]  # La primera columna es el tipo (Tablas, Campos, etc.)
-            if tipo_objeto not in diferencias_por_tipo:
-                diferencias_por_tipo[tipo_objeto] = []
-            diferencias_por_tipo[tipo_objeto].append(fila[1:])  # El resto de las columnas
-        
-        # Escribir diferencias por tipo
-        for tipo, items in sorted(diferencias_por_tipo.items()):
-            f.write(f"\n{'='*60}\n")
-            f.write(f"{tipo.upper()}\n")
-            f.write(f"{'='*60}\n\n")
+            tipo_objeto = fila[0]
+            nombre_objeto = fila[1]
+            estatus = fila[2]
+            sql_bd1 = fila[4] or ""  # SQL para BD1 (columna 4)
+            sql_bd2 = fila[5] or ""  # SQL para BD2 (columna 5)
             
-            for item in items:
-                nombre = item[0]  # Nombre del objeto
-                estatus = item[1]  # Estatus
-                detalle_bd1 = item[2] or ""
-                detalle_bd2 = item[3] or ""
-                sql_bd1 = item[4] or ""
-                sql_bd2 = item[5] or ""
-                diferencias = item[6] or ""
+            print(f"Procesando BD1 - {tipo_objeto} {nombre_objeto}: {estatus}")
+            
+            # Para BD1: Objetos que NO EXISTEN en BD1 pero SÍ en BD2
+            if "NO EXISTE EN BD1" in estatus:
+                sql_usar = sql_bd2  # Usar SQL de BD2 para crear en BD1
+                if sql_usar.strip():
+                    sql_limpio = _limpiar_sql(sql_usar)
+                    if sql_limpio:
+                        # Aplicar CREATE OR ALTER si es procedimiento, vista o trigger
+                        if any(tipo in tipo_objeto for tipo in ['Procedimientos', 'Vistas', 'Triggers']):
+                            sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
+                            sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW')
+                            sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
+                        
+                        todos_scripts.append(sql_limpio)
+                        print(f"  -> AGREGADO: {tipo_objeto} {nombre_objeto}")
+            
+            # Para BD1: También incluir objetos DIFERENTES (modificaciones desde BD2)
+            elif "DIFERENTE" in estatus:
+                sql_usar = sql_bd2  # Usar SQL de BD2 para modificar BD1
+                if sql_usar.strip():
+                    sql_limpio = _limpiar_sql(sql_usar)
+                    if sql_limpio:
+                        if any(tipo in tipo_objeto for tipo in ['Procedimientos', 'Vistas', 'Triggers']):
+                            sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
+                            sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW') 
+                            sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
+                        
+                        todos_scripts.append(sql_limpio)
+                        print(f"  -> MODIFICACION: {tipo_objeto} {nombre_objeto}")
+        
+        # Escribir todos los scripts
+        if todos_scripts:
+            for sql in todos_scripts:
+                f.write(sql + "\n\n")
+            f.write(f"-- Total scripts: {len(todos_scripts)}\n")
+        else:
+            f.write("-- BD1 ya tiene todos los objetos de BD2\n")
+        
+        print(f"SCRIPTS BD1 GENERADOS: {len(todos_scripts)}")
+
+def _exportar_scripts_bd2(ruta, filas):
+    """
+    Exporta scripts para BD2: 
+    - Lo que le falta pero sí está en BD1
+    - Modificaciones para quedar igual a BD1
+    """
+    with open(ruta, 'w', encoding='utf-8') as f:
+        f.write("-- SCRIPTS PARA BD2\n")
+        f.write("-- 1. Agregar lo que falta en BD2 pero existe en BD1\n") 
+        f.write("-- 2. Modificar objetos para quedar igual a BD1\n")
+        f.write("-- Ejecutar en orden en BD2\n\n")
+        
+        # Recolectar todos los scripts para BD2
+        todos_scripts = []
+        
+        for fila in filas:
+            tipo_objeto = fila[0]
+            nombre_objeto = fila[1]
+            estatus = fila[2]
+            sql_bd1 = fila[6] or ""  # SQL para BD1 (columna 6 - SQL BD1)
+            sql_bd2 = fila[7] or ""  # SQL para BD2 (columna 7 - SQL BD2)
+            
+            print(f"Procesando BD2 - {tipo_objeto} {nombre_objeto}: {estatus}")
+            print(f"  SQL BD1 disponible: {bool(sql_bd1.strip())}")
+            print(f"  SQL BD2 disponible: {bool(sql_bd2.strip())}")
+            
+            # Para BD2: Objetos que NO EXISTEN en BD2 pero SÍ en BD1
+            if "NO EXISTE EN BD2" in estatus:
+                sql_usar = sql_bd1  # Usar SQL de BD1 para crear en BD2
+                if sql_usar.strip():
+                    sql_limpio = _limpiar_sql(sql_usar)
+                    if sql_limpio:
+                        # Aplicar CREATE OR ALTER si es procedimiento, vista o trigger
+                        if any(tipo in tipo_objeto for tipo in ['Procedimientos', 'Vistas', 'Triggers']):
+                            sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
+                            sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW')
+                            sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
+                        
+                        todos_scripts.append(sql_limpio)
+                        print(f"  -> AGREGADO: {tipo_objeto} {nombre_objeto}")
+            
+            # Para BD2: También incluir objetos DIFERENTES (modificaciones desde BD1)
+            elif "DIFERENTE" in estatus:
+                sql_usar = sql_bd1  # Usar SQL de BD1 para modificar BD2
+                if sql_usar.strip():
+                    sql_limpio = _limpiar_sql(sql_usar)
+                    if sql_limpio:
+                        if any(tipo in tipo_objeto for tipo in ['Procedimientos', 'Vistas', 'Triggers']):
+                            sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
+                            sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW') 
+                            sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
+                        
+                        todos_scripts.append(sql_limpio)
+                        print(f"  -> MODIFICACION: {tipo_objeto} {nombre_objeto}")
+        
+        # Escribir todos los scripts
+        if todos_scripts:
+            for sql in todos_scripts:
+                f.write(sql + "\n\n")
+            f.write(f"-- Total scripts: {len(todos_scripts)}\n")
+        else:
+            f.write("-- BD2 ya está sincronizada con BD1\n")
+        
+        print(f"SCRIPTS BD2 GENERADOS: {len(todos_scripts)}")
+
+def _clasificar_script(tipo_objeto, sql_limpio, scripts_tablas, scripts_campos, scripts_indices,
+                      scripts_pk, scripts_fk, scripts_generadores, scripts_procedimientos, 
+                      scripts_vistas, scripts_triggers):
+    """
+    Clasifica el script en la categoría correspondiente.
+    """
+    # Aplicar CREATE OR ALTER para procedimientos, vistas y triggers
+    if "Procedimientos" in tipo_objeto:
+        sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
+        scripts_procedimientos.append(sql_limpio)
+    
+    elif "Vistas" in tipo_objeto:
+        sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW')
+        scripts_vistas.append(sql_limpio)
+    
+    elif "Triggers" in tipo_objeto:
+        sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
+        scripts_triggers.append(sql_limpio)
+    
+    elif "Tablas" in tipo_objeto:
+        scripts_tablas.append(sql_limpio)
+    
+    elif "Campos_" in tipo_objeto:
+        scripts_campos.append(sql_limpio)
+    
+    elif "Indices_" in tipo_objeto:
+        scripts_indices.append(sql_limpio)
+    
+    elif "PK_" in tipo_objeto:
+        scripts_pk.append(sql_limpio)
+    
+    elif "FK_" in tipo_objeto:
+        scripts_fk.append(sql_limpio)
+    
+    elif "Generadores" in tipo_objeto:
+        scripts_generadores.append(sql_limpio)       
+
+def _limpiar_sql(sql_completo):
+    """
+    Limpia el SQL, manteniendo solo lo ejecutable.
+    """
+    if not sql_completo:
+        return ""
+    
+    # Si el SQL ya está limpio, mantenerlo
+    if 'CREATE ' in sql_completo or 'ALTER ' in sql_completo or 'SET ' in sql_completo:
+        # Solo dividir en líneas si es necesario para limpiar
+        lines = sql_completo.split('\n')
+        sql_limpio = []
+        
+        for line in lines:
+            line = line.strip()
+            # Eliminar líneas que contengan solo propiedades de campos sin SQL
+            if (line and 
+                not line.startswith('/* Tabla:') and 
+                not line.startswith('/* Primary keys') and
+                not line.startswith('Tipo:') and
+                not line.startswith('Nullable:') and
+                not line.startswith('Default:')):
+                sql_limpio.append(line)
+        
+        return '\n'.join(sql_limpio)
+    
+    return sql_completo.strip()
+
+def _extraer_sql_ejecutable(sql_completo):
+    """
+    Extrae solo el SQL ejecutable, eliminando comentarios innecesarios y texto extra.
+    
+    Args:
+        sql_completo (str): SQL con posibles comentarios y texto extra
+        
+    Returns:
+        str: SQL limpio y ejecutable
+    """
+    if not sql_completo:
+        return ""
+    
+    lines = sql_completo.split('\n')
+    sql_limpio = []
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Mantener solo líneas que contengan SQL ejecutable
+        if (line.startswith('CREATE') or 
+            line.startswith('ALTER') or 
+            line.startswith('DROP') or 
+            line.startswith('SET') or 
+            line.startswith('UPDATE') or
+            line.startswith('INSERT') or
+            line.startswith('DELETE') or
+            (line.startswith('/*') and '*/' in line) or  # Comentarios cortos
+            line.endswith(';')):
+            
+            # Limpiar comentarios extensos pero mantener los esenciales
+            if line.startswith('/*') and len(line) > 100:
+                # Comentario muy largo, omitir
+                continue
                 
-                f.write(f"OBJETO: {nombre}\n")
-                f.write(f"ESTADO: {estatus}\n")
-                
-                if detalle_bd1:
-                    f.write(f"BD1: {detalle_bd1}\n")
-                if detalle_bd2:
-                    f.write(f"BD2: {detalle_bd2}\n")
-                if diferencias:
-                    f.write(f"DIFERENCIAS: {diferencias}\n")
-                
-                # Mostrar SQL según la BD destino
-                if bd_destino == "BD1" and sql_bd2:
-                    f.write(f"SQL PARA BD2:\n{sql_bd2}\n")
-                elif bd_destino == "BD2" and sql_bd1:
-                    f.write(f"SQL PARA BD1:\n{sql_bd1}\n")
-                
-                f.write("-" * 60 + "\n\n")
+            sql_limpio.append(line)
+    
+    return '\n'.join(sql_limpio)
 
 def _exportar_txt_sql(ruta, sql_bd1, sql_bd2):
     """

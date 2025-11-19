@@ -55,11 +55,13 @@ def run_comparison(worker_signals, bd1, bd2, user, password, options, output_pat
         if not output_path:
             output_path = "reporte_comparacion"
         
-        # Generar archivos TXT separados para cada BD
+        # Generar archivos TXT separados para cada BD (PASANDO LAS OPCIONES)
         txt_path_bd1, txt_path_bd2, txt_path_sql = exportar_solo_diferencias(
-            output_path, diferencias, 
+            output_path, 
+            diferencias, 
             sql_generator.get_sql_bd1(), 
-            sql_generator.get_sql_bd2()
+            sql_generator.get_sql_bd2(),
+            options  # ← AQUÍ SE AGREGAN LAS OPCIONES
         )
 
         # Enviar SQL final a la interfaz
@@ -76,31 +78,19 @@ def run_comparison(worker_signals, bd1, bd2, user, password, options, output_pat
 
 
 def _ejecutar_comparaciones(c1, c2, diferencias, sql_generator, options, worker_signals, step, total_steps):
-    """
-    Ejecuta las comparaciones según las opciones seleccionadas.
+    """Ejecuta las comparaciones según las opciones seleccionadas."""
     
-    Args:
-        c1: Conexión a BD1
-        c2: Conexión a BD2
-        diferencias: Lista para almacenar diferencias
-        sql_generator: Generador de SQL
-        options: Opciones de comparación
-        worker_signals: Señales para comunicación
-        step (int): Paso actual
-        total_steps (int): Total de pasos
-        
-    Returns:
-        int: Paso actualizado
-    """
     # Tablas
     if options.get("tablas"):
         worker_signals.message.emit("Comparando tablas...")
         comparar_tablas(c1, c2, diferencias, sql_generator)
+        worker_signals.message.emit(f"Diferencias en tablas: {len([f for f in diferencias if f[0] == 'Tablas'])}")
+    
     step += 1
     worker_signals.progress.emit(int((step / total_steps) * 100))
 
-    # Campos
-    if options.get("campos"):
+    # Campos (solo si se seleccionaron tablas)
+    if options.get("campos") and options.get("tablas"):
         worker_signals.message.emit("Comparando campos...")
         tablas_comunes = sorted(set(get_tables(c1)) & set(get_tables(c2)))
         count = len(tablas_comunes)
@@ -108,20 +98,22 @@ def _ejecutar_comparaciones(c1, c2, diferencias, sql_generator, options, worker_
             comparar_campos_tabla(c1, c2, t, diferencias, sql_generator)
             if count:
                 worker_signals.progress.emit(int(((step + idx / count) / total_steps) * 100))
+        
+        total_campos = len([f for f in diferencias if 'Campos_' in f[0]])
+        worker_signals.message.emit(f"Diferencias en campos: {total_campos}")
+    
     step += 1
     worker_signals.progress.emit(int((step / total_steps) * 100))
 
-    # Índices y PK
+    # Índices y PK (AHORA INDEPENDIENTE DE LAS TABLAS)
     if options.get("indices") or options.get("pk"):
         worker_signals.message.emit("Comparando índices y PK...")
-        tablas_comunes = sorted(set(get_tables(c1)) & set(get_tables(c2)))
-        for t in tablas_comunes:
-            comparar_indices_pk(c1, c2, t, diferencias, sql_generator)
+        comparar_indices_pk(c1, c2, diferencias, sql_generator)  # ← YA NO DEPENDE DE TABLAS_COMUNES
     step += 1
     worker_signals.progress.emit(int((step / total_steps) * 100))
 
-    # Foreign Keys
-    if options.get("fk"):
+    # Foreign Keys (solo si se seleccionaron tablas)
+    if options.get("fk") and options.get("tablas"):
         worker_signals.message.emit("Comparando llaves foráneas...")
         tablas_comunes = sorted(set(get_tables(c1)) & set(get_tables(c2)))
         for t in tablas_comunes:
@@ -159,16 +151,15 @@ def _ejecutar_comparaciones(c1, c2, diferencias, sql_generator, options, worker_
 
     return step
 
-
 def _construir_mensaje_final(txt_path_bd1, txt_path_bd2, txt_path_sql):
     """
     Construye el mensaje final con las rutas de los archivos generados.
     """
     mensaje = "Archivos TXT generados:\n"
     if txt_path_bd1:
-        mensaje += f"Diferencias BD1: {txt_path_bd1}\n"
+        mensaje += f"Scripts BD1: {txt_path_bd1}\n"
     if txt_path_bd2:
-        mensaje += f"Diferencias BD2: {txt_path_bd2}\n"
+        mensaje += f"Scripts BD2: {txt_path_bd2}\n"
     if txt_path_sql:
         mensaje += f"SQL Completo: {txt_path_sql}"
     return mensaje

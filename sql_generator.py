@@ -88,96 +88,81 @@ class SQLGenerator:
     def _get_sql_type(self, props):
         """
         Convierte las propiedades de campo a tipo SQL válido para Firebird.
-        
-        Args:
-            props (dict): Propiedades del campo
-            
-        Returns:
-            str: Tipo SQL formateado
         """
-        tipo_base = props['tipo_base'].upper()
-        longitud = props['longitud']
-        precision = props['precision']
-        escala = props['escala']
+        tipo_base = props['tipo_base'].upper() if props.get('tipo_base') else ''
+        tipo_completo = props['tipo'].upper() if props.get('tipo') else tipo_base
         
-        # Mapear tipos de Firebird correctamente
+        # Si ya tenemos un tipo completo, usarlo (puede incluir longitud/precision)
+        if '(' in tipo_completo and ')' in tipo_completo:
+            return tipo_completo
+        
+        longitud = props.get('longitud')
+        precision = props.get('precision')
+        escala = props.get('escala')
+        
+        # Mapear tipos de Firebird
         type_mapping = {
             'LONG': 'INTEGER',
             'SHORT': 'SMALLINT',
             'INT64': 'BIGINT',
             'QUAD': 'BIGINT',
-            'VARYING': 'VARCHAR'
+            'VARYING': 'VARCHAR',
+            'FLOAT': 'FLOAT',
+            'DOUBLE': 'DOUBLE PRECISION',
+            'TIMESTAMP': 'TIMESTAMP',
+            'DATE': 'DATE',
+            'TIME': 'TIME',
+            'TEXT': 'BLOB SUB_TYPE TEXT'
         }
         
         # Aplicar mapeo si es necesario
         if tipo_base in type_mapping:
             tipo_base = type_mapping[tipo_base]
+        elif tipo_completo in type_mapping:
+            tipo_base = type_mapping[tipo_completo]
+        else:
+            tipo_base = tipo_completo or tipo_base
         
-        # Construir el tipo base
-        if tipo_base in ('CHAR', 'VARCHAR'):
+        # Construir el tipo con longitud/precision si es necesario
+        if tipo_base in ('CHAR', 'VARCHAR', 'CHARACTER VARYING'):
             if longitud and longitud > 0:
-                sql_type = f"{tipo_base}({longitud})"
+                return f"{tipo_base}({longitud})"
             else:
-                sql_type = tipo_base
+                return f"{tipo_base}(1)"  # Longitud por defecto
         elif tipo_base in ('DECIMAL', 'NUMERIC'):
             if precision is not None:
-                if escala != 0:
-                    sql_type = f"{tipo_base}({precision},{abs(escala)})"
+                if escala and escala != 0:
+                    return f"{tipo_base}({precision},{abs(escala)})"
                 else:
-                    sql_type = f"{tipo_base}({precision})"
+                    return f"{tipo_base}({precision})"
             else:
-                sql_type = tipo_base
+                return tipo_base
         elif tipo_base == 'BLOB':
             if longitud == 1:
-                sql_type = "BLOB SUB_TYPE TEXT"
+                return "BLOB SUB_TYPE TEXT"
             else:
-                sql_type = "BLOB"
+                return "BLOB"
         else:
-            sql_type = tipo_base
-        
-        return sql_type
+            return tipo_base
     
     def generate_create_table(self, table_name, campos, conexion, destino):
         """
-        Genera SQL para crear una tabla completa con constraints.
-        
-        Args:
-            table_name (str): Nombre de la tabla
-            campos (dict): Campos de la tabla
-            conexion: Conexión a la BD para obtener constraints
-            destino (str): "BD1" o "BD2"
-            
-        Returns:
-            str: Sentencia SQL completa
+        Genera SQL LIMPIO para crear una tabla.
         """
         pk = get_primary_keys(conexion, table_name)
         
-        # Obtener FKs de forma segura (con manejo de errores)
-        fks = {}
-        try:
-            fks = get_foreign_keys(conexion, table_name)
-        except Exception as e:
-            # Si hay error al obtener FKs, continuar sin ellas
-            if self.worker_signals:
-                self.worker_signals.message.emit(f"Advertencia: No se pudieron obtener FKs para {table_name}: {str(e)}")
-        
-        sql = f"/* Tabla: {table_name} */\n\n"
-        sql += f"CREATE TABLE {table_name} (\n"
+        sql = f"CREATE TABLE {table_name} (\n"
         field_defs = []
         
         for campo, props in campos.items():
             sql_type = self._get_sql_type(props)
             
-            # Construir la definición completa del campo
             field_def = f"    {campo} {sql_type}"
             
-            # Agregar CHARACTER SET y COLLATE si están especificados
+            # CHARACTER SET y COLLATE
             charset_info = props.get('charset_info', '')
             if charset_info:
                 field_def += charset_info
-            else:
-                # Si no hay charset info, usar CHARACTER SET NONE COLLATE NONE por defecto
-                field_def += " CHARACTER SET NONE COLLATE NONE"
                 
             # NULL/NOT NULL
             if props['nullable'] == 'NO':
@@ -200,12 +185,12 @@ class SQLGenerator:
             field_defs.append(field_def)
         
         sql += ",\n".join(field_defs)
-        sql += "\n);\n"
         
-        # PRIMARY KEY
+        # PRIMARY KEY inline si existe
         if pk:
-            sql += f"\n/* Primary keys definition */\n\n"
-            sql += f"ALTER TABLE {table_name} ADD CONSTRAINT PK_{table_name} PRIMARY KEY ({', '.join(pk)});\n"
+            sql += f",\n    PRIMARY KEY ({', '.join(pk)})"
+        
+        sql += "\n);\n"
         
         self.emit_sql("TABLA", sql, destino)
         return sql
@@ -416,4 +401,33 @@ class SQLGenerator:
             sql += f"SET GENERATOR {generator_name} TO {value};\n"
         
         self.emit_sql("GENERADOR", sql, destino)
+        return sql
+    def generate_alter_field(self, table_name, campo, props, destino):
+        """
+        Genera SQL LIMPIO para modificar un campo existente.
+        """
+        sql_type = self._get_sql_type(props)
+        
+        # SQL DIRECTO para modificar campo (depende de la versión de Firebird)
+        sql = f"ALTER TABLE {table_name} ALTER COLUMN {campo} TYPE {sql_type}"
+        
+        # Agregar CHARACTER SET si está especificado
+        charset_info = props.get('charset_info', '')
+        if charset_info:
+            sql += charset_info
+        
+        # NULL/NOT NULL
+        if props['nullable'] == 'NO':
+            sql += " NOT NULL"
+        
+        # DEFAULT
+        if props['default']:
+            default_value = props['default']
+            if default_value.upper().startswith('DEFAULT '):
+                default_value = default_value[8:]
+            sql += f" DEFAULT {default_value}"
+        
+        sql += ";\n"
+        
+        self.emit_sql("CAMPO", sql, destino)
         return sql

@@ -101,6 +101,11 @@ def comparar_campos_tabla(c1, c2, tabla, reporte, sql_generator):
     f1 = get_fields(c1, tabla)
     f2 = get_fields(c2, tabla)
     
+    # DEBUG: Mostrar información de los campos
+    print(f"Comparando campos de tabla: {tabla}")
+    print(f"Campos BD1: {list(f1.keys())}")
+    print(f"Campos BD2: {list(f2.keys())}")
+    
     for c in sorted(set(f1.keys()) - set(f2.keys())):
         sql = sql_generator.generate_create_field(tabla, c, f1[c], "BD1")
         detalle_bd1 = f"Tipo: {f1[c]['tipo']}, Nullable: {f1[c]['nullable']}"
@@ -116,44 +121,107 @@ def comparar_campos_tabla(c1, c2, tabla, reporte, sql_generator):
         agregar_fila_solo_diferencias(reporte, f"Campos_{tabla}", c, "NO EXISTE EN BD1", "", detalle_bd2, "", sql)
         
     for c in sorted(set(f1.keys()) & set(f2.keys())):
-        if f1[c] != f2[c]:
-            diferencias = []
-            for key in ['tipo', 'nullable', 'default', 'longitud', 'precision', 'escala']:
-                if str(f1[c].get(key)) != str(f2[c].get(key)):
-                    diferencias.append(f"{key}: {f1[c].get(key)} vs {f2[c].get(key)}")
+        # Comparar propiedades relevantes, ignorando diferencias menores
+        props_comparables = ['tipo', 'nullable', 'default', 'longitud', 'precision', 'escala']
+        diferentes = False
+        diferencias = []
+        
+        for key in props_comparables:
+            val1 = str(f1[c].get(key, '')).strip().upper()
+            val2 = str(f2[c].get(key, '')).strip().upper()
             
+            # Ignorar diferencias en formato pero no en valor real
+            if val1 != val2:
+                # Para tipos, comparar solo el tipo base (ignorar longitud/precision en la comparación inicial)
+                if key == 'tipo':
+                    tipo_base1 = f1[c].get('tipo_base', '').upper()
+                    tipo_base2 = f2[c].get('tipo_base', '').upper()
+                    if tipo_base1 != tipo_base2:
+                        diferentes = True
+                        diferencias.append(f"{key}: {f1[c].get(key)} vs {f2[c].get(key)}")
+                else:
+                    diferentes = True
+                    diferencias.append(f"{key}: {f1[c].get(key)} vs {f2[c].get(key)}")
+        
+        if diferentes:
             detalle_bd1 = f"Tipo: {f1[c]['tipo']}, Nullable: {f1[c]['nullable']}"
             detalle_bd2 = f"Tipo: {f2[c]['tipo']}, Nullable: {f2[c]['nullable']}"
             diferencia_texto = "; ".join(diferencias)
-            agregar_fila_solo_diferencias(reporte, f"Campos_{tabla}", c, "DIFERENTE", detalle_bd1, detalle_bd2, "", "", diferencia_texto)
-
-
-def comparar_indices_pk(c1, c2, tabla, reporte, sql_generator):
-    """Compara índices y primary keys de una tabla"""
-    i1 = get_indexes(c1, tabla)
-    i2 = get_indexes(c2, tabla)
+            
+            # GENERAR SQL para modificar el campo en ambas direcciones
+            sql_bd1 = sql_generator.generate_alter_field(tabla, c, f1[c], "BD1")
+            sql_bd2 = sql_generator.generate_alter_field(tabla, c, f2[c], "BD2")
+            
+            print(f"Campo diferente encontrado: {tabla}.{c}")
+            print(f"  Diferencias: {diferencia_texto}")
+            print(f"  SQL BD1: {sql_bd1}")
+            print(f"  SQL BD2: {sql_bd2}")
+            
+            agregar_fila_solo_diferencias(reporte, f"Campos_{tabla}", c, "DIFERENTE", 
+                                        detalle_bd1, detalle_bd2, sql_bd1, sql_bd2, diferencia_texto)
+def comparar_indices_pk(c1, c2, reporte, sql_generator):
+    """Compara índices y primary keys entre bases de datos"""
+    # Obtener todas las tablas de ambas bases de datos
+    tablas_bd1 = set(get_tables(c1))
+    tablas_bd2 = set(get_tables(c2))
+    todas_las_tablas = sorted(tablas_bd1 | tablas_bd2)
     
-    for idx in sorted(set(i1.keys()) - set(i2.keys())):
-        sql = sql_generator.generate_create_index(tabla, idx, i1[idx], "BD1")
-        agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD2", str(i1[idx]), "", sql, "")
+    for tabla in todas_las_tablas:
+        # Solo comparar si la tabla existe en al menos una BD
+        existe_en_bd1 = tabla in tablas_bd1
+        existe_en_bd2 = tabla in tablas_bd2
         
-    for idx in sorted(set(i2.keys()) - set(i1.keys())):
-        sql = sql_generator.generate_create_index(tabla, idx, i2[idx], "BD2")
-        agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD1", "", str(i2[idx]), "", sql)
+        if existe_en_bd1 and existe_en_bd2:
+            # La tabla existe en ambas BD, comparar índices y PK
+            i1 = get_indexes(c1, tabla)
+            i2 = get_indexes(c2, tabla)
+            
+            for idx in sorted(set(i1.keys()) - set(i2.keys())):
+                sql = sql_generator.generate_create_index(tabla, idx, i1[idx], "BD1")
+                agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD2", str(i1[idx]), "", sql, "")
+                
+            for idx in sorted(set(i2.keys()) - set(i1.keys())):
+                sql = sql_generator.generate_create_index(tabla, idx, i2[idx], "BD2")
+                agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD1", "", str(i2[idx]), "", sql)
+                
+            for idx in sorted(set(i1.keys()) & set(i2.keys())):
+                if i1[idx] != i2[idx]:
+                    agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "DIFERENTE", str(i1[idx]), str(i2[idx]), "", "")
+
+            # Primary Keys (solo si la tabla existe en ambas BD)
+            p1 = get_primary_keys(c1, tabla)
+            p2 = get_primary_keys(c2, tabla)
+            
+            if p1 != p2:
+                sql1 = sql_generator.generate_create_primary_key(tabla, p1, "BD1") if p1 else ""
+                sql2 = sql_generator.generate_create_primary_key(tabla, p2, "BD2") if p2 else ""
+                agregar_fila_solo_diferencias(reporte, f"PK_{tabla}", ",".join(p1) if p1 else "(VACÍA)", "DIFERENTE", str(p1), str(p2), sql1, sql2)
         
-    for idx in sorted(set(i1.keys()) & set(i2.keys())):
-        if i1[idx] != i2[idx]:
-            agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "DIFERENTE", str(i1[idx]), str(i2[idx]), "", "")
-
-    # Primary Keys
-    p1 = get_primary_keys(c1, tabla)
-    p2 = get_primary_keys(c2, tabla)
-    
-    if p1 != p2:
-        sql1 = sql_generator.generate_create_primary_key(tabla, p1, "BD1") if p1 else ""
-        sql2 = sql_generator.generate_create_primary_key(tabla, p2, "BD2") if p2 else ""
-        agregar_fila_solo_diferencias(reporte, f"PK_{tabla}", ",".join(p1) if p1 else "(VACÍA)", "DIFERENTE", str(p1), str(p2), sql1, sql2)
-
+        elif existe_en_bd1 and not existe_en_bd2:
+            # La tabla solo existe en BD1, incluir sus índices y PK como faltantes en BD2
+            i1 = get_indexes(c1, tabla)
+            p1 = get_primary_keys(c1, tabla)
+            
+            for idx in i1.keys():
+                sql = sql_generator.generate_create_index(tabla, idx, i1[idx], "BD1")
+                agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD2", str(i1[idx]), "", sql, "")
+            
+            if p1:
+                sql = sql_generator.generate_create_primary_key(tabla, p1, "BD1")
+                agregar_fila_solo_diferencias(reporte, f"PK_{tabla}", ",".join(p1), "NO EXISTE EN BD2", str(p1), "", sql, "")
+        
+        elif existe_en_bd2 and not existe_en_bd1:
+            # La tabla solo existe en BD2, incluir sus índices y PK como faltantes en BD1
+            i2 = get_indexes(c2, tabla)
+            p2 = get_primary_keys(c2, tabla)
+            
+            for idx in i2.keys():
+                sql = sql_generator.generate_create_index(tabla, idx, i2[idx], "BD2")
+                agregar_fila_solo_diferencias(reporte, f"Indices_{tabla}", idx, "NO EXISTE EN BD1", "", str(i2[idx]), "", sql)
+            
+            if p2:
+                sql = sql_generator.generate_create_primary_key(tabla, p2, "BD2")
+                agregar_fila_solo_diferencias(reporte, f"PK_{tabla}", ",".join(p2), "NO EXISTE EN BD1", "", str(p2), "", sql)
 
 def comparar_foreign_keys(c1, c2, tabla, reporte, sql_generator):
     """Compara llaves foráneas de una tabla"""
@@ -260,3 +328,41 @@ def comparar_generadores(c1, c2, reporte, sql_generator):
             
         if v1 != v2:
             agregar_fila_solo_diferencias(reporte, "Generadores", g, "DIFERENTE", str(v1), str(v2), "", "")
+
+def generate_alter_field(self, table_name, campo, props, destino):
+    """
+    Genera SQL para modificar un campo existente en Firebird.
+    
+    Args:
+        table_name (str): Nombre de la tabla
+        campo (str): Nombre del campo
+        props (dict): Nuevas propiedades del campo
+        destino (str): "BD1" o "BD2"
+        
+    Returns:
+        str: Sentencia ALTER TABLE para modificar el campo
+    """
+    sql_type = self._get_sql_type(props)
+    
+    sql = f"ALTER TABLE {table_name} ALTER {campo} TYPE {sql_type}"
+    
+    # Agregar CHARACTER SET y COLLATE si están especificados
+    charset_info = props.get('charset_info', '')
+    if charset_info:
+        sql += charset_info
+    
+    # NULL/NOT NULL
+    if props['nullable'] == 'NO':
+        sql += " NOT NULL"
+    
+    # DEFAULT
+    if props['default']:
+        default_value = props['default']
+        if default_value.upper().startswith('DEFAULT '):
+            default_value = default_value[8:]
+        sql += f" DEFAULT {default_value}"
+    
+    sql += ";\n"
+    
+    self.emit_sql("CAMPO", sql, destino)
+    return sql
