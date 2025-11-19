@@ -74,17 +74,24 @@ def get_generators(con):
 
 
 def get_indexes(con, table):
-    """Obtiene índices de una tabla específica"""
+    """Obtiene índices de una tabla específica (excluyendo PK)"""
     cur = con.cursor()
     cur.execute("""
-        SELECT TRIM(i.rdb$index_name) AS idx_name,
-               i.rdb$unique_flag,
-               LIST(TRIM(s.rdb$field_name)) AS fields
+        SELECT 
+            TRIM(i.rdb$index_name) AS idx_name,
+            i.rdb$unique_flag,
+            LIST(TRIM(s.rdb$field_name)) AS fields
         FROM rdb$indices i
         LEFT JOIN rdb$index_segments s ON s.rdb$index_name = i.rdb$index_name
         WHERE i.rdb$relation_name = ?
+        AND i.rdb$index_name NOT IN (
+            SELECT rdb$index_name 
+            FROM rdb$relation_constraints 
+            WHERE rdb$relation_name = ? 
+            AND rdb$constraint_type = 'PRIMARY KEY'
+        )
         GROUP BY i.rdb$index_name, i.rdb$unique_flag
-    """, (table,))
+    """, (table, table))
     results = {}
     for r in cur.fetchall():
         results[r[0]] = {
@@ -95,13 +102,14 @@ def get_indexes(con, table):
 
 
 def get_primary_keys(con, table):
-    """Obtiene las primary keys de una tabla"""
+    """Obtiene las primary keys REALES de una tabla"""
     cur = con.cursor()
     cur.execute("""
         SELECT TRIM(sg.rdb$field_name)
-        FROM rdb$indices idx
-        JOIN rdb$index_segments sg ON sg.rdb$index_name = idx.rdb$index_name
-        WHERE idx.rdb$relation_name = ? AND idx.rdb$index_type IS NULL
+        FROM rdb$relation_constraints rc
+        JOIN rdb$index_segments sg ON sg.rdb$index_name = rc.rdb$index_name
+        WHERE rc.rdb$relation_name = ? 
+        AND rc.rdb$constraint_type = 'PRIMARY KEY'
         ORDER BY sg.rdb$field_position
     """, (table,))
     return [r[0] for r in cur.fetchall()]
