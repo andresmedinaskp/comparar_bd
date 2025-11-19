@@ -105,7 +105,7 @@ def _filtrar_filas_por_opciones(filas, opciones):
 
 def _exportar_scripts_bd1(ruta, filas):
     """
-    Exporta scripts para BD1: Todo lo que le falta pero sí está en BD2.
+    Exporta scripts para BD1: Solo objetos que NO EXISTEN en BD1 pero SÍ en BD2
     """
     with open(ruta, 'w', encoding='utf-8') as f:
         f.write("-- SCRIPTS PARA BD1 (PRINCIPAL)\n")
@@ -119,12 +119,12 @@ def _exportar_scripts_bd1(ruta, filas):
             tipo_objeto = fila[0]
             nombre_objeto = fila[1]
             estatus = fila[2]
-            sql_bd1 = fila[4] or ""  # SQL para BD1 (columna 4)
-            sql_bd2 = fila[5] or ""  # SQL para BD2 (columna 5)
+            sql_bd1 = fila[5] or ""  # SQL para BD1 (columna 5)
+            sql_bd2 = fila[6] or ""  # SQL para BD2 (columna 6)
             
             print(f"Procesando BD1 - {tipo_objeto} {nombre_objeto}: {estatus}")
             
-            # Para BD1: Objetos que NO EXISTEN en BD1 pero SÍ en BD2
+            # SOLO PARA BD1: Objetos que NO EXISTEN en BD1 pero SÍ en BD2
             if "NO EXISTE EN BD1" in estatus:
                 sql_usar = sql_bd2  # Usar SQL de BD2 para crear en BD1
                 if sql_usar.strip():
@@ -139,19 +139,8 @@ def _exportar_scripts_bd1(ruta, filas):
                         todos_scripts.append(sql_limpio)
                         print(f"  -> AGREGADO: {tipo_objeto} {nombre_objeto}")
             
-            # Para BD1: También incluir objetos DIFERENTES (modificaciones desde BD2)
-            elif "DIFERENTE" in estatus:
-                sql_usar = sql_bd2  # Usar SQL de BD2 para modificar BD1
-                if sql_usar.strip():
-                    sql_limpio = _limpiar_sql(sql_usar)
-                    if sql_limpio:
-                        if any(tipo in tipo_objeto for tipo in ['Procedimientos', 'Vistas', 'Triggers']):
-                            sql_limpio = sql_limpio.replace('CREATE PROCEDURE', 'CREATE OR ALTER PROCEDURE')
-                            sql_limpio = sql_limpio.replace('CREATE VIEW', 'CREATE OR ALTER VIEW') 
-                            sql_limpio = sql_limpio.replace('CREATE TRIGGER', 'CREATE OR ALTER TRIGGER')
-                        
-                        todos_scripts.append(sql_limpio)
-                        print(f"  -> MODIFICACION: {tipo_objeto} {nombre_objeto}")
+            # ELIMINADO: No procesar objetos "DIFERENTES" en BD1
+            # Los ALTER TABLE solo deben ir a BD2
         
         # Escribir todos los scripts
         if todos_scripts:
@@ -182,8 +171,8 @@ def _exportar_scripts_bd2(ruta, filas):
             tipo_objeto = fila[0]
             nombre_objeto = fila[1]
             estatus = fila[2]
-            sql_bd1 = fila[6] or ""  # SQL para BD1 (columna 6 - SQL BD1)
-            sql_bd2 = fila[7] or ""  # SQL para BD2 (columna 7 - SQL BD2)
+            sql_bd1 = fila[5] or ""  # CORRECCIÓN: SQL para BD1 (columna 5)
+            sql_bd2 = fila[6] or ""  # CORRECCIÓN: SQL para BD2 (columna 6)
             
             print(f"Procesando BD2 - {tipo_objeto} {nombre_objeto}: {estatus}")
             print(f"  SQL BD1 disponible: {bool(sql_bd1.strip())}")

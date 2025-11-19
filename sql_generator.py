@@ -147,8 +147,10 @@ class SQLGenerator:
     
     def generate_create_table(self, table_name, campos, conexion, destino):
         """
-        Genera SQL LIMPIO para crear una tabla.
+        Genera SQL LIMPIO para crear una tabla SIN primary key.
+        La PK se agregará después con ALTER TABLE.
         """
+        # Obtener PK pero NO incluirla inline
         pk = get_primary_keys(conexion, table_name)
         
         sql = f"CREATE TABLE {table_name} (\n"
@@ -186,13 +188,16 @@ class SQLGenerator:
         
         sql += ",\n".join(field_defs)
         
-        # PRIMARY KEY inline si existe
-        if pk:
-            sql += f",\n    PRIMARY KEY ({', '.join(pk)})"
-        
+        # NO incluir PRIMARY KEY inline - se agregará después
         sql += "\n);\n"
         
         self.emit_sql("TABLA", sql, destino)
+        
+        # Generar ALTER TABLE para PK por separado
+        if pk:
+            pk_sql = self.generate_create_primary_key(table_name, pk, destino)
+            return sql + "\n" + pk_sql
+        
         return sql
     
     def generate_create_field(self, table_name, campo, props, destino):
