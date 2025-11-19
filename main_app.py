@@ -131,12 +131,19 @@ class MainApp(QWidget):
                 border-radius: 3px;
             }
             
+            /* ESTILO MEJORADO PARA TEXTEDIT - LETRA MÁS GRANDE */
             QTextEdit {
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 12px;
+                line-height: 1.4;
                 border: 2px solid #bdc3c7;
                 border-radius: 4px;
                 background-color: white;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 10px;
+                padding: 8px;
+            }
+            
+            QTextEdit:focus {
+                border-color: #3498db;
             }
             
             QTabWidget::pane {
@@ -342,9 +349,39 @@ class MainApp(QWidget):
         
         self.sql_bd1 = QTextEdit()
         self.sql_bd1.setPlaceholderText("El SQL para sincronizar BD2 con los objetos de BD1 aparecerá aquí...")
+        # AUMENTAR TAMAÑO DE LETRA
+        self.sql_bd1.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 12px;
+                line-height: 1.4;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+                padding: 8px;
+            }
+            QTextEdit:focus {
+                border-color: #3498db;
+            }
+        """)
         
         self.sql_bd2 = QTextEdit()
         self.sql_bd2.setPlaceholderText("El SQL para sincronizar BD1 con los objetos de BD2 aparecerá aquí...")
+        # AUMENTAR TAMAÑO DE LETRA
+        self.sql_bd2.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 12px;
+                line-height: 1.4;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+                padding: 8px;
+            }
+            QTextEdit:focus {
+                border-color: #3498db;
+            }
+        """)
         
         sql_splitter.addWidget(self.sql_bd1)
         sql_splitter.addWidget(self.sql_bd2)
