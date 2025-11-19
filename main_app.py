@@ -315,6 +315,7 @@ class MainApp(QWidget):
                         self.chk_generar_sql]:
             checkbox.setChecked(True)
 
+        # Conectar señal de tablas para habilitar/deshabilitar dependientes
         self.chk_tablas.stateChanged.connect(self._on_tablas_toggle)
 
         # Organizar en grid
@@ -452,6 +453,7 @@ class MainApp(QWidget):
 
     def _configurar_estado_inicial(self):
         """Configura el estado inicial de la aplicación."""
+        # Llamar a _on_tablas_toggle para establecer el estado inicial correcto
         self._on_tablas_toggle()
 
     # Métodos de eventos y acciones (se mantienen iguales)
@@ -469,8 +471,20 @@ class MainApp(QWidget):
     def _on_tablas_toggle(self):
         """Habilita/deshabilita opciones dependientes de tablas."""
         activar = self.chk_tablas.isChecked()
-        for checkbox in [self.chk_campos, self.chk_indices, self.chk_pk, self.chk_fk]:
+        
+        # Opciones que dependen de que las tablas estén seleccionadas
+        opciones_dependientes = [
+            self.chk_campos, 
+            self.chk_pk, 
+            self.chk_fk
+        ]
+        
+        for checkbox in opciones_dependientes:
             checkbox.setEnabled(activar)
+            
+            # Si se desactivan las tablas, también desmarcar las opciones dependientes
+            if not activar:
+                checkbox.setChecked(False)
 
     def _copy_sql(self, bd):
         """Copia el SQL al portapapeles."""
