@@ -353,7 +353,7 @@ class MainApp(QWidget):
         self.sql_bd1.setStyleSheet("""
             QTextEdit {
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
+                font-size: 14px;
                 line-height: 1.4;
                 border: 2px solid #bdc3c7;
                 border-radius: 4px;
@@ -371,7 +371,7 @@ class MainApp(QWidget):
         self.sql_bd2.setStyleSheet("""
             QTextEdit {
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
+                font-size: 14px;
                 line-height: 1.4;
                 border: 2px solid #bdc3c7;
                 border-radius: 4px;

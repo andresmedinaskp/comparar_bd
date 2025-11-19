@@ -92,14 +92,26 @@ def _filtrar_filas_por_opciones(filas, opciones):
             if tipo_objeto.startswith(prefijo):
                 if opciones.get(opcion, False):
                     incluir = True
-                break
+                    break
+                else:
+                    # Si el prefijo coincide pero la opción NO está seleccionada, NO incluir
+                    incluir = False
+                    break
         
-        # Si no coincide con ningún prefijo conocido, incluir por defecto
-        if not any(tipo_objeto.startswith(prefijo) for prefijo in mapeo_tipos.keys()):
-            incluir = True
+        # Si no coincide con ningún prefijo conocido, NO incluir por defecto
+        # Esto evita que se incluyan objetos no seleccionados
         
         if incluir:
             filas_filtradas.append(fila)
+    
+    # DEBUG: Mostrar qué se está filtrando
+    print(f"Opciones seleccionadas: {opciones}")
+    print(f"Filas antes del filtro: {len(filas)}")
+    print(f"Filas después del filtro: {len(filas_filtradas)}")
+    
+    # Mostrar qué tipos de objetos se están incluyendo
+    tipos_incluidos = set(f[0] for f in filas_filtradas)
+    print(f"Tipos de objetos incluidos: {tipos_incluidos}")
     
     return filas_filtradas
 
