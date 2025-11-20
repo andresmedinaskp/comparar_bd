@@ -9,7 +9,7 @@ import threading
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QFileDialog, QLineEdit,
     QVBoxLayout, QHBoxLayout, QCheckBox, QMessageBox, QProgressBar, 
-    QGroupBox, QGridLayout, QTabWidget, QTextEdit, QSplitter, QFrame
+    QGroupBox, QGridLayout, QTabWidget, QTextEdit, QSplitter, QFrame, QScrollArea
 )
 from PyQt5.QtCore import QThread, Qt
 from PyQt5.QtGui import QFont, QPalette, QColor
@@ -32,7 +32,26 @@ class MainApp(QWidget):
     def _inicializar_interfaz(self):
         """Configura la interfaz gráfica de usuario."""
         self.setWindowTitle("🔍 Comparador de Bases de Datos Firebird")
-        self.resize(1000, 800)
+        
+        # Establecer un tamaño fijo inicial que sea responsive
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        
+        # Usar 80% del ancho y 85% del alto de la pantalla
+        width = int(screen_geometry.width() * 0.8)
+        height = int(screen_geometry.height() * 0.85)
+        
+        self.resize(width, height)
+        
+        # Establecer tamaño mínimo para evitar que se haga muy pequeña
+        self.setMinimumSize(1000, 700)
+        
+        # Establecer tamaño mínimo para evitar que se haga muy pequeña
+        self.setMaximumSize(1000, 900)
+
+        # Centrar la ventana en la pantalla
+        self.move(screen_geometry.center() - self.rect().center())
+        
         self._aplicar_estilo_moderno()
         self._build_ui()
 
@@ -44,35 +63,30 @@ class MainApp(QWidget):
                 font-family: 'Segoe UI', Arial, sans-serif;
             }
             
-            QGroupBox {
-                font-weight: bold;
-                font-size: 12px;
-                color: #2c3e50;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 8px 0 8px;
-                color: #34495e;
-            }
-            
-            QPushButton {
-                background-color: #3498db;
-                border: none;
-                color: white;
-                padding: 8px 16px;
+            QTabWidget::pane {
+                border: 1px solid #bdc3c7;
                 border-radius: 4px;
-                font-weight: bold;
-                min-width: 100px;
+                background-color: white;
+                margin-top: 5px;
             }
             
-            QPushButton:hover {
-                background-color: #2980b9;
+            QTabBar::tab {
+                background-color: #ecf0f1;
+                color: #2c3e50;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                min-width: 120px;
+            }
+            
+            QTabBar::tab:selected {
+                background-color: #3498db;
+                color: white;
+            }
+            
+            QTabBar::tab:hover {
+                background-color: #d5dbdb;
             }
             
             QPushButton:pressed {
@@ -192,6 +206,10 @@ class MainApp(QWidget):
         # Tab de SQL
         sql_tab = self._crear_tab_sql()
         tab_widget.addTab(sql_tab, "📊 SQL Generado")
+
+        # Nueva pestaña Acerca de
+        acerca_tab = self._crear_tab_acerca_de()
+        tab_widget.addTab(acerca_tab, "ℹ️ Acerca de")
 
         main_layout.addWidget(tab_widget)
 
@@ -659,3 +677,136 @@ class MainApp(QWidget):
         self.btn_compare.setEnabled(True)
         self.progress.setValue(100)
         self.lbl_msg.setText("✅ Comparación finalizada - Scripts generados")
+
+    def _crear_tab_acerca_de(self):
+        """Crea la pestaña de información acerca de la aplicación."""
+        acerca_tab = QWidget()
+        acerca_layout = QVBoxLayout()
+        acerca_layout.setSpacing(15)
+        acerca_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Título de la aplicación
+        titulo = QLabel("🔍 Comparador de Bases de Datos Firebird")
+        titulo.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                font-weight: bold;
+                color: white;
+                padding: 12px;
+                background-color: #3498db;
+                border-radius: 6px;
+                text-align: center;
+            }
+        """)
+        titulo.setAlignment(Qt.AlignCenter)
+        
+        # Scroll area para el contenido
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                background-color: white;
+            }
+            QScrollArea > QWidget > QWidget { 
+                background-color: white; 
+            }
+        """)
+        
+        # Widget contenedor del scroll
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+        scroll_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Descripción de la aplicación
+        descripcion = QLabel("""
+            <h3 style='color: #2c3e50;'>📖 ¿Para qué sirve?</h3>
+            <p>Herramienta para comparar dos bases de datos Firebird y generar scripts SQL automáticamente para sincronizarlas.</p>
+            
+            <h3 style='color: #2c3e50;'>🎯 Funcionalidades principales</h3>
+            <ul>
+                <li><b>Comparar esquemas</b> entre bases de datos</li>
+                <li><b>Generar scripts SQL</b> automáticamente</li>
+                <li><b>Sincronizar entornos</b> (Desarrollo, Pruebas, Producción)</li>
+                <li><b>Detectar diferencias</b> en objetos de base de datos</li>
+                <li><b>Exportar scripts</b> organizados y comentados</li>
+            </ul>
+            
+            <h3 style='color: #2c3e50;'>💡 Objetos comparables</h3>
+            <ul>
+                <li>📊 Tablas y Campos</li>
+                <li>📈 Índices y Llaves</li>
+                <li>⚡ Triggers y Procedimientos</li>
+                <li>👁️ Vistas y Generadores</li>
+            </ul>
+        """)
+        descripcion.setStyleSheet("""
+            QLabel {
+                font-size: 11px;
+                line-height: 1.5;
+                color: #2c3e50;
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 6px;
+                border: 1px solid #e9ecef;
+            }
+        """)
+        descripcion.setWordWrap(True)
+        
+        # Información del desarrollador
+        desarrollador = QLabel("""
+            <div style='background-color: #2c3e50; color: white; padding: 15px; border-radius: 6px;'>
+                <h3 style='color: #3498db; margin-top: 0;'>👨‍💻 Desarrollador</h3>
+                <p><b>Nombre:</b> Carlos Andres Camayo Medina</p>
+                <p><b>Correo:</b> 
+                    <a href='mailto:camayoandrs@gmail.com' style='color: #3498db; text-decoration: none;'>
+                        camayoandrs@gmail.com
+                    </a>
+                </p>
+                <p><b>Especialidad:</b> Desarrollo de software y bases de datos</p>
+            </div>
+        """)
+        desarrollador.setStyleSheet("""
+            QLabel {
+                font-size: 11px;
+                line-height: 1.5;
+            }
+            QLabel a {
+                color: #3498db;
+            }
+        """)
+        desarrollador.setWordWrap(True)
+        desarrollador.setOpenExternalLinks(True)
+        
+        # Versión y copyright
+        version = QLabel("""
+            <div style='text-align: center; padding: 10px; background-color: #ecf0f1; border-radius: 6px;'>
+                <p><b>Versión 1.0.0</b></p>
+                <p>© 2024 - Desarrollado con Python y PyQt5</p>
+            </div>
+        """)
+        version.setStyleSheet("""
+            QLabel {
+                font-size: 10px;
+                color: #7f8c8d;
+            }
+        """)
+        version.setAlignment(Qt.AlignCenter)
+        
+        # Agregar widgets al scroll layout
+        scroll_layout.addWidget(descripcion)
+        scroll_layout.addWidget(desarrollador)
+        scroll_layout.addWidget(version)
+        scroll_layout.addStretch()
+        
+        # Configurar scroll area
+        scroll_area.setWidget(scroll_content)
+        
+        # Agregar a layout principal
+        acerca_layout.addWidget(titulo)
+        acerca_layout.addWidget(scroll_area)
+        
+        acerca_tab.setLayout(acerca_layout)
+        return acerca_tab
