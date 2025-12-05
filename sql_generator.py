@@ -161,11 +161,12 @@ class SQLGenerator:
             
             field_def = f"    {campo} {sql_type}"
             
-            # CHARACTER SET y COLLATE
-            charset_info = props.get('charset_info', '')
-            if charset_info:
-                field_def += charset_info
-                
+            # CHARACTER SET y COLLate solo para tipos de caracteres y BLOB de texto
+            if props.get('charset_info') and sql_type not in ['INTEGER', 'SMALLINT', 'BIGINT', 'FLOAT', 'DOUBLE PRECISION', 'DECIMAL', 'NUMERIC', 'DATE', 'TIME', 'TIMESTAMP']:
+                charset_info = props.get('charset_info', '')
+                if charset_info:
+                    field_def += charset_info
+                    
             # NULL/NOT NULL
             if props['nullable'] == 'NO':
                 field_def += " NOT NULL"
@@ -218,13 +219,30 @@ class SQLGenerator:
         # Construir la definición completa del campo
         sql = f"ALTER TABLE {table_name} ADD {campo} {sql_type}"
         
-        # Agregar CHARACTER SET y COLLATE si están especificados
-        charset_info = props.get('charset_info', '')
-        if charset_info:
-            sql += charset_info
+        # Agregar CHARACTER SET y COLLATE solo para tipos de caracteres
+        # Tipos numéricos NO deben tener CHARACTER SET
+        if props.get('charset_info'):
+            # Tipos que NO pueden tener CHARACTER SET
+            tipos_sin_charset = ['INTEGER', 'SMALLINT', 'BIGINT', 'FLOAT', 'DOUBLE PRECISION', 
+                                'DECIMAL', 'NUMERIC', 'DATE', 'TIME', 'TIMESTAMP']
+            
+            tipo_base = props.get('tipo_base', '').upper()
+            if tipo_base not in tipos_sin_charset and sql_type not in tipos_sin_charset:
+                charset_info = props.get('charset_info', '')
+                if charset_info:
+                    sql += charset_info
+            else:
+                # Para tipos numéricos, NO agregar charset
+                pass
         else:
-            # Si no hay charset info, usar CHARACTER SET NONE COLLATE NONE por defecto
-            sql += " CHARACTER SET NONE COLLATE NONE"
+            # Si no hay charset info y es tipo de carácter, usar CHARACTER SET NONE por defecto
+            tipos_caracter = ['CHAR', 'VARCHAR', 'BLOB SUB_TYPE TEXT', 'BLOB']
+            tipo_base = props.get('tipo_base', '').upper()
+            sql_type_upper = sql_type.upper()
+            
+            if (tipo_base in tipos_caracter or 
+                any(tipo in sql_type_upper for tipo in ['CHAR', 'VARCHAR', 'BLOB'])):
+                sql += " CHARACTER SET NONE"
         
         if props['nullable'] == 'NO':
             sql += " NOT NULL"
@@ -407,19 +425,41 @@ class SQLGenerator:
         
         self.emit_sql("GENERADOR", sql, destino)
         return sql
-    def generate_alter_field(self, table_name, campo, props, destino):
+    
+    def generate_alter_field(self, table_name, campo, props, destino, props_original=None):
         """
         Genera SQL LIMPIO para modificar un campo existente.
+        Si la modificación no es posible (ej: reducir tamaño), la comenta.
+        
+        Args:
+            table_name (str): Nombre de la tabla
+            campo (str): Nombre del campo
+            props (dict): Nuevas propiedades del campo (destino)
+            destino (str): "BD1" o "BD2"
+            props_original (dict, optional): Propiedades originales del campo (origen)
+            
+        Returns:
+            str: Sentencia ALTER TABLE (puede estar comentada)
         """
         sql_type = self._get_sql_type(props)
         
-        # SQL DIRECTO para modificar campo (depende de la versión de Firebird)
+        # Verificar si la modificación es posible cuando tenemos propiedades originales
+        puede_modificar = True
+        razon = ""
+        
+        if props_original:
+            puede_modificar, razon = self._puede_modificar_campo(props, props_original)
+        
+        # Construir SQL base
         sql = f"ALTER TABLE {table_name} ALTER COLUMN {campo} TYPE {sql_type}"
         
-        # Agregar CHARACTER SET si está especificado
-        charset_info = props.get('charset_info', '')
-        if charset_info:
-            sql += charset_info
+        # Agregar CHARACTER SET solo para tipos de caracteres
+        # Tipos numéricos NO deben tener CHARACTER SET
+        if props.get('charset_info'):
+            if not self._es_tipo_numerico(sql_type):
+                charset_info = props.get('charset_info', '')
+                if charset_info:
+                    sql += charset_info
         
         # NULL/NOT NULL
         if props['nullable'] == 'NO':
@@ -434,5 +474,80 @@ class SQLGenerator:
         
         sql += ";\n"
         
+        # Si no se puede modificar, comentar la sentencia y agregar advertencia
+        if not puede_modificar:
+            sql = f"-- ⚠️ ADVERTENCIA: No se puede modificar {table_name}.{campo} - {razon}\n-- {sql}"
+        
         self.emit_sql("CAMPO", sql, destino)
         return sql
+
+    def _puede_modificar_campo(self, props_bd1, props_bd2):
+        """
+        Determina si se puede modificar un campo de BD2 a BD1 sin causar errores.
+        
+        Args:
+            props_bd1 (dict): Propiedades del campo en BD1 (destino)
+            props_bd2 (dict): Propiedades del campo en BD2 (origen)
+            
+        Returns:
+            tuple: (bool, str) - Si se puede modificar y mensaje de razón
+        """
+        tipo_base1 = props_bd1.get('tipo_base', '').upper()
+        tipo_base2 = props_bd2.get('tipo_base', '').upper()
+        
+        # Si los tipos base son diferentes, verificar compatibilidad
+        if tipo_base1 != tipo_base2:
+            # Mapeo de compatibilidad de tipos
+            tipos_compatibles = {
+                'CHAR': ['CHAR', 'VARCHAR'],
+                'VARCHAR': ['CHAR', 'VARCHAR'],
+                'SMALLINT': ['SMALLINT', 'INTEGER', 'BIGINT'],
+                'INTEGER': ['SMALLINT', 'INTEGER', 'BIGINT'],
+                'BIGINT': ['BIGINT'],
+                'DECIMAL': ['DECIMAL', 'NUMERIC'],
+                'NUMERIC': ['DECIMAL', 'NUMERIC'],
+                'FLOAT': ['FLOAT', 'DOUBLE PRECISION'],
+                'DOUBLE PRECISION': ['DOUBLE PRECISION'],
+            }
+            
+            if tipo_base1 not in tipos_compatibles or tipo_base2 not in tipos_compatibles[tipo_base1]:
+                return False, f"Tipos incompatibles: {tipo_base2} -> {tipo_base1}"
+        
+        # Verificar reducción de tamaño para tipos de caracteres
+        if tipo_base1 in ('CHAR', 'VARCHAR') and tipo_base2 in ('CHAR', 'VARCHAR'):
+            longitud1 = props_bd1.get('longitud', 0) or 0
+            longitud2 = props_bd2.get('longitud', 0) or 0
+            
+            if longitud1 < longitud2:
+                return False, f"No se puede reducir tamaño: {longitud2} -> {longitud1}"
+        
+        # Verificar reducción de precisión para tipos numéricos
+        if tipo_base1 in ('DECIMAL', 'NUMERIC') and tipo_base2 in ('DECIMAL', 'NUMERIC'):
+            precision1 = props_bd1.get('precision', 0) or 0
+            precision2 = props_bd2.get('precision', 0) or 0
+            escala1 = abs(props_bd1.get('escala', 0) or 0)
+            escala2 = abs(props_bd2.get('escala', 0) or 0)
+            
+            if precision1 < precision2 or escala1 < escala2:
+                return False, f"No se puede reducir precisión/escala: {precision2},{escala2} -> {precision1},{escala1}"
+        
+        return True, "OK"
+    
+    def _es_tipo_numerico(self, tipo):
+        """
+        Determina si un tipo SQL es numérico (no puede tener CHARACTER SET).
+        
+        Args:
+            tipo (str): Tipo SQL
+            
+        Returns:
+            bool: True si es tipo numérico
+        """
+        if not tipo:
+            return False
+        
+        tipos_numericos = ['INTEGER', 'SMALLINT', 'BIGINT', 'FLOAT', 'DOUBLE PRECISION', 
+                        'DOUBLE', 'DECIMAL', 'NUMERIC', 'REAL']
+        
+        tipo_upper = tipo.upper().split('(')[0]  # Tomar solo la parte base del tipo
+        return tipo_upper in tipos_numericos

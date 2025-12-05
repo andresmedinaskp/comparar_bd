@@ -149,8 +149,11 @@ def comparar_campos_tabla(c1, c2, tabla, reporte, sql_generator):
             diferencia_texto = "; ".join(diferencias)
             
             # GENERAR SQL para modificar el campo en ambas direcciones
-            sql_bd1 = sql_generator.generate_alter_field(tabla, c, f1[c], "BD1")
-            sql_bd2 = sql_generator.generate_alter_field(tabla, c, f2[c], "BD2")
+            # Para BD1: modificar a como está en BD2 (usando propiedades de BD2 como destino, BD1 como origen)
+            sql_bd1 = sql_generator.generate_alter_field(tabla, c, f2[c], "BD1", f1[c])
+            
+            # Para BD2: modificar a como está en BD1 (usando propiedades de BD1 como destino, BD2 como origen)
+            sql_bd2 = sql_generator.generate_alter_field(tabla, c, f1[c], "BD2", f2[c])
             
             print(f"Campo diferente encontrado: {tabla}.{c}")
             print(f"  Diferencias: {diferencia_texto}")
@@ -329,27 +332,37 @@ def comparar_generadores(c1, c2, reporte, sql_generator):
         if v1 != v2:
             agregar_fila_solo_diferencias(reporte, "Generadores", g, "DIFERENTE", str(v1), str(v2), "", "")
 
-def generate_alter_field(self, table_name, campo, props, destino):
+def generate_alter_field(self, table_name, campo, props, destino, props_original=None):
     """
     Genera SQL para modificar un campo existente en Firebird.
+    Si la modificación no es posible, la comenta.
     
     Args:
         table_name (str): Nombre de la tabla
         campo (str): Nombre del campo
-        props (dict): Nuevas propiedades del campo
+        props (dict): Nuevas propiedades del campo (destino)
         destino (str): "BD1" o "BD2"
+        props_original (dict, optional): Propiedades originales del campo (origen)
         
     Returns:
-        str: Sentencia ALTER TABLE para modificar el campo
+        str: Sentencia ALTER TABLE (puede estar comentada)
     """
     sql_type = self._get_sql_type(props)
     
+    # Verificar si la modificación es posible cuando tenemos propiedades originales
+    puede_modificar = True
+    razon = ""
+    
+    if props_original:
+        puede_modificar, razon = self._puede_modificar_campo(props, props_original)
+    
     sql = f"ALTER TABLE {table_name} ALTER {campo} TYPE {sql_type}"
     
-    # Agregar CHARACTER SET y COLLATE si están especificados
-    charset_info = props.get('charset_info', '')
-    if charset_info:
-        sql += charset_info
+    # Agregar CHARACTER SET y COLLATE solo para tipos de caracteres
+    if props.get('charset_info') and not self._es_tipo_numerico(sql_type):
+        charset_info = props.get('charset_info', '')
+        if charset_info:
+            sql += charset_info
     
     # NULL/NOT NULL
     if props['nullable'] == 'NO':
@@ -363,6 +376,10 @@ def generate_alter_field(self, table_name, campo, props, destino):
         sql += f" DEFAULT {default_value}"
     
     sql += ";\n"
+    
+    # Si no se puede modificar, comentar la sentencia y agregar advertencia
+    if not puede_modificar:
+        sql = f"-- ⚠️ ADVERTENCIA: No se puede modificar {table_name}.{campo} - {razon}\n-- {sql}"
     
     self.emit_sql("CAMPO", sql, destino)
     return sql
