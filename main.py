@@ -31,3 +31,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+# pyinstaller --onefile --icon=bd.ico --name="BDCompare" --noconsole main.py
